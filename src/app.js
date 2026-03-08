@@ -2,10 +2,14 @@ const express = require('express');
 const redis = require('redis');
 const IdGenerator = require('./utils/idGenerator');
 const { encode } = require('./utils/base62');
+const trackClick = require('./middleware/analytics'); // 1. Import the middleware
 
 const app = express();
-const client = redis.createClient(); // Assumes Redis is running locally
+const client = redis.createClient(); 
 const generator = new IdGenerator(process.env.WORKER_ID || 1);
+
+// Connect to Redis (Required for v4+)
+client.connect().catch(console.error);
 
 app.use(express.json());
 
@@ -13,34 +17,29 @@ app.use(express.json());
 app.post('/shorten', async (req, res) => {
     const { longUrl } = req.body;
     
-    // Generate unique ID and encode it
     const id = generator.generate();
     const shortKey = encode(id);
 
-    // Save to Database (Mocking SQL call) and Cache in Redis
-    // await db.save(shortKey, longUrl);
-    await client.set(shortKey, longUrl, { EX: 3600 }); // Cache for 1 hour
+    // Cache in Redis
+    await client.set(shortKey, longUrl, { EX: 3600 }); 
 
     res.json({ shortUrl: `http://localhost:3000/${shortKey}` });
 });
 
-// 2. Redirect (The "Click Tracking" logic)
-app.get('/:key', async (req, res) => {
+// 2. Redirect (Now using trackClick middleware)
+app.get('/:key', trackClick, async (req, res) => {
     const key = req.params.key;
 
     // Try Redis Cache First
     let longUrl = await client.get(key);
 
     if (!longUrl) {
-        // Cache Miss -> Check DB (Logic not shown)
-        // longUrl = await db.find(key);
         return res.status(404).send('URL not found');
     }
 
-    // DATA ANALYSIS: Log click asynchronously
-    console.log(`Click tracked for ${key} at ${new Date().toISOString()}`);
-
-    res.redirect(302, longUrl); // Temporary redirect for analytics
+    // The middleware already handled the "Data Analysis" logging, 
+    // so this function just handles the redirect.
+    res.redirect(302, longUrl); 
 });
 
 app.listen(3000, () => console.log('Server running on port 3000'));
